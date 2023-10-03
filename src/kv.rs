@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use crate::log::LogOperation::{self, Rm, Set};
 use crate::log::{Log, LogRecord};
-use crate::kvs::KvsEngine;
+use crate::engine::KvsEngine;
 
 use slog::{o, Logger, info};
 

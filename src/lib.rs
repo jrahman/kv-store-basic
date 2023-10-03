@@ -6,5 +6,5 @@
 
 pub mod log;
 pub mod kv;
-pub mod kvs;
+pub mod engine;
 pub mod server;

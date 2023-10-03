@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use slog::o;
 use slog::Drain;
 
-use kvs::kvs::KvsEngine;
+use kvs::engine::KvsEngine;
 
 #[derive(Debug, Parser)] // requires `derive` feature
 #[command(name = env!("CARGO_PKG_NAME"), about = env!("CARGO_PKG_DESCRIPTION"), author = env!("CARGO_PKG_AUTHORS"), version = env!("CARGO_PKG_VERSION"))]
