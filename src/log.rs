@@ -67,7 +67,7 @@ struct FileManifestRecord {
 ///
 struct LogFile {
     // Metadata on the file manifest contents for this log file
-    record: FileManifestRecord,
+    manifest_record: FileManifestRecord,
 
     // Mapping from log index to offset into the file
     index_map: HashMap<u64, u64>,
@@ -127,7 +127,7 @@ impl LogFile {
 
         Ok(LogFile {
             path,
-            record: manifest_record,
+            manifest_record,
             file,
             index_map,
             logger: logger
@@ -150,7 +150,7 @@ impl LogFile {
         let log_file_path = path.join(manifest_record.file_number.to_string());
         Ok(LogFile {
             path,
-            record: manifest_record,
+            manifest_record,
             index_map: HashMap::new(),
             file: Arc::new(File::create(&log_file_path)?),
             logger: logger
@@ -183,7 +183,7 @@ impl LogFile {
         bincode::serialize_into(self.file.as_ref(), &record)
             .map_err(|e| Error::other(e.to_string()))?;
         self.index_map.insert(index, offset);
-        self.record.max_index = self.record.max_index.max(index);
+        self.manifest_record.max_index = self.manifest_record.max_index.max(index);
 
         if let Some(ref logger) = self.logger {
             info!(logger, "Wrote record"; "index" => record.index);
@@ -199,13 +199,20 @@ impl LogFile {
     ///
     fn compact<F: Fn(&LogRecord) -> bool>(&mut self, predicate: &F) -> Result<()> {
         if let Some(ref logger) = self.logger {
-            info!(logger, "Compacting file"; "file_number" => self.record.file_number);
+            info!(logger, "Compacting file"; "file_number" => self.manifest_record.file_number);
         }
 
-        let new_file_name = self.path.join(format!("{}.log.tmp", self.record.file_number));
-        let old_file_name = self.path.join(format!("{}.log", self.record.file_number));
+        let new_file_name = self
+            .path
+            .join(format!("{}.log.tmp", self.manifest_record.file_number));
+        let old_file_name = self
+            .path
+            .join(format!("{}.log", self.manifest_record.file_number));
 
-        let mut output_file = File::options().write(true).create(true).open(&new_file_name)?;
+        let mut output_file = File::options()
+            .write(true)
+            .create(true)
+            .open(&new_file_name)?;
 
         let file_iterator = FileIterator::new(self)?;
 
@@ -319,19 +326,19 @@ impl Log {
 
         for record in manifest_records {
             let log_file = LogFile::open(&logger, path.clone(), record)?;
-            log_files.insert(log_file.record.min_index, log_file);
+            log_files.insert(log_file.manifest_record.min_index, log_file);
         }
 
         let mut last_index = log_files
             .last_key_value()
-            .map_or(0, |(_, log_file)| log_file.record.max_index);
+            .map_or(0, |(_, log_file)| log_file.manifest_record.max_index);
 
         // The final file must be scanned over if it was a partial file open
         // upon last process exit. In such a case, the max_index = u64::max
         // indicating the file was not closed gracefully with a manifest write
         // with the up to date values
         if let Some(entry) = log_files.last_entry() {
-            last_index = entry.get().record.max_index;
+            last_index = entry.get().manifest_record.max_index;
         }
 
         if let Some(ref logger) = logger {
@@ -378,7 +385,7 @@ impl Log {
             };
 
             if let Some(ref logger) = self.logger {
-                info!(logger, "Writing record"; "index" => record.index, "file_number" => tail_file.record.file_number);
+                info!(logger, "Writing record"; "index" => record.index, "file_number" => tail_file.manifest_record.file_number);
             }
 
             let last_index = record.index;
@@ -388,7 +395,7 @@ impl Log {
             tail_file.file.sync_data()?;
 
             if let Some(ref logger) = self.logger {
-                info!(logger, "Wrote record"; "index" => last_index, "file_number" => tail_file.record.file_number);
+                info!(logger, "Wrote record"; "index" => last_index, "file_number" => tail_file.manifest_record.file_number);
             }
 
             Ok(last_index)
@@ -535,7 +542,7 @@ impl Log {
             &self.logger,
             self.log_files
                 .iter()
-                .map(|(_, log_file)| log_file.record)
+                .map(|(_, log_file)| log_file.manifest_record)
                 .collect(),
             &self.path,
         )
@@ -547,10 +554,10 @@ impl Log {
     fn seal_last_file(&mut self) -> Result<()> {
         if let Some(mut entry) = self.log_files.last_entry() {
             let log_file = entry.get_mut();
-            log_file.record.max_index =
+            log_file.manifest_record.max_index =
                 self.next_index.load(std::sync::atomic::Ordering::SeqCst) - 1;
 
-            let mut last_record = log_file.record;
+            let mut last_record = log_file.manifest_record;
             last_record.file_number += 1;
             last_record.min_index = last_record.max_index + 1;
             last_record.max_index = u64::MAX;
@@ -568,7 +575,7 @@ impl Log {
                 &self.logger,
                 self.log_files
                     .iter()
-                    .map(|(_, log_file)| log_file.record)
+                    .map(|(_, log_file)| log_file.manifest_record)
                     .collect(),
                 &self.path,
             )?;
@@ -585,7 +592,7 @@ impl Drop for Log {
         let records = self
             .log_files
             .iter()
-            .map(|(_, log_file)| log_file.record)
+            .map(|(_, log_file)| log_file.manifest_record)
             .collect();
         let _ = Self::write_manifest(&self.logger, records, &self.path);
     }
