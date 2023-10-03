@@ -1,4 +1,5 @@
 use clap::Parser;
+use slog::{Drain, o};
 
 
 #[derive(Parser)] // requires `derive` feature
@@ -13,6 +14,11 @@ struct Cli {
 
 
 fn main() {
+    let decorator = slog_term::PlainDecorator::new(std::io::stdout());
+    let drain = slog_term::CompactFormat::new(decorator).build().fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    let logger = slog::Logger::root(drain, o!("module" => "server"));
+
     let cli = Cli::parse();
 
 }

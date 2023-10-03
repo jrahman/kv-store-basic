@@ -1,6 +1,7 @@
 
 
 use clap::{Parser, Subcommand};
+use slog::{Drain, o};
 
 #[derive(Debug, Parser)] // requires `derive` feature
 #[command(name = env!("CARGO_PKG_NAME"), about = env!("CARGO_PKG_DESCRIPTION"), author = env!("CARGO_PKG_AUTHORS"), version = env!("CARGO_PKG_VERSION"))]
@@ -37,6 +38,11 @@ enum Commands {
 }
 
 fn main() {
+    let decorator = slog_term::PlainDecorator::new(std::io::stdout());
+    let drain = slog_term::CompactFormat::new(decorator).build().fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    let logger = slog::Logger::root(drain, o!("module" => "client"));
+    
     let cli = Cli::parse();
 
     match cli.command {
