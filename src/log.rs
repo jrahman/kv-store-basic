@@ -416,6 +416,18 @@ impl Log {
         }
     }
 
+    pub(crate) fn total_size(&self) -> Result<u64> {
+        self
+        .log_files
+        .values()
+        .map(|lf| lf.size())
+        .fold(Ok(0), |acc, elem| match (acc, elem) {
+            (Ok(acc), Ok(elem)) => Ok(acc + elem),
+            (Err(acc), _) => Err(acc),
+            (_, Err(elem)) => Err(elem),
+        })
+    }
+
     ///
     /// Read the current manifest file returning a vector of FileManifestRecords
     /// sorted by max_index. This will read from the MANIFEST file in the
@@ -510,11 +522,9 @@ impl Log {
 
         if let Some(ref logger) = logger {
             info!(logger, "Finished syncing file"; "file_name" => new_manifest_file_path.to_str());
-        }
-
-        if let Some(ref logger) = logger {
             info!(logger, "Renaming file"; "source_file" => "MANIFEST.new", "destination_file" => "MANIFEST");
         }
+
         std::fs::rename(path.join("MANIFEST.new"), path.join("MANIFEST"))?;
 
         if let Some(ref logger) = logger {
