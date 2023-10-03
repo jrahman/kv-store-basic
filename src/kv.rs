@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use crate::log::LogOperation::{self, Rm, Set};
 use crate::log::{Log, LogRecord};
+use crate::kvs::KvsEngine;
 
 use slog::{o, Logger, info};
 
@@ -48,10 +49,22 @@ impl KvStore {
         })
     }
 
+    pub fn compact(&mut self) -> Result<()> {
+        self.log.compact_log(|record: &LogRecord| -> bool {
+            match record.operation {
+                Rm { ref key } => self.mapping.contains_key(key),
+                Set { ref key, .. } => !self.mapping.contains_key(key),
+            }
+        })
+    }
+}
+
+impl KvsEngine for KvStore {
+
     ///
     ///
     ///
-    pub fn set(&mut self, key: String, value: String) -> Result<()> {
+    fn set(&mut self, key: String, value: String) -> Result<()> {
         let op = LogOperation::Set {
             key: key.to_string(),
             value,
@@ -80,7 +93,7 @@ impl KvStore {
     }
 
     ///
-    pub fn get(&mut self, key: String) -> Result<Option<String>> {
+    fn get(&mut self, key: String) -> Result<Option<String>> {
         let position = self.mapping.get(&key);
         match position {
             Some(position) => {
@@ -94,19 +107,10 @@ impl KvStore {
         }
     }
 
-    pub fn compact(&mut self) -> Result<()> {
-        self.log.compact_log(|record: &LogRecord| -> bool {
-            match record.operation {
-                Rm { ref key } => self.mapping.contains_key(key),
-                Set { ref key, .. } => !self.mapping.contains_key(key),
-            }
-        })
-    }
-
     ///
     ///
     ///
-    pub fn remove(&mut self, key: String) -> Result<()> {
+    fn remove(&mut self, key: String) -> Result<()> {
         self.log.write(LogOperation::Rm {
             key: key.to_string(),
         })?;

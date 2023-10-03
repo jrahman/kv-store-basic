@@ -6,3 +6,4 @@
 
 pub mod log;
 pub mod kv;
+pub mod kvs;

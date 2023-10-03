@@ -7,6 +7,8 @@ use std::process::Command;
 use tempfile::TempDir;
 use walkdir::WalkDir;
 
+use kvs::kvs::KvsEngine;
+
 // `kvs` with no args should exit with a non-zero code.
 #[test]
 fn cli_no_args() {
