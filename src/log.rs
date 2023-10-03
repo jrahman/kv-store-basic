@@ -77,17 +77,22 @@ struct LogFile {
     file: Arc<File>,
 
     logger: Option<Logger>,
+
+    path: PathBuf,
 }
 
 impl LogFile {
     ///
     /// Open an existing log file given the FileManifestRecord describing
-    /// the file to open
+    /// the file to open and the base path to the directory storing the log
+    ///
+    /// During the open operation, the log files must be scanned sequentially
+    /// to rebuild the index -> offset mapping used for lookups at runtime
     ///
     fn open(
         logger: &Option<Logger>,
         path: PathBuf,
-        manifest_record: &FileManifestRecord,
+        manifest_record: FileManifestRecord,
     ) -> Result<LogFile> {
         let log_file_path = path.join(format!("{}.log", manifest_record.file_number));
 
@@ -116,12 +121,13 @@ impl LogFile {
                 break;
             }
             let log_record: LogRecord =
-                bincode::deserialize_from(&mut file).map_err(|_| ErrorKind::InvalidData)?;
+                bincode::deserialize_from(&mut file).map_err(|e| Error::other(e))?;
             index_map.insert(log_record.index, offset);
         }
 
         Ok(LogFile {
-            record: *manifest_record,
+            path,
+            record: manifest_record,
             file,
             index_map,
             logger: logger
@@ -139,11 +145,12 @@ impl LogFile {
     fn create(
         logger: &Option<Logger>,
         path: PathBuf,
-        manifest_record: &FileManifestRecord,
+        manifest_record: FileManifestRecord,
     ) -> Result<LogFile> {
         let log_file_path = path.join(manifest_record.file_number.to_string());
         Ok(LogFile {
-            record: *manifest_record,
+            path,
+            record: manifest_record,
             index_map: HashMap::new(),
             file: Arc::new(File::create(&log_file_path)?),
             logger: logger
@@ -182,6 +189,48 @@ impl LogFile {
             info!(logger, "Wrote record"; "index" => record.index);
         }
 
+        Ok(())
+    }
+
+    ///
+    /// Perform compaction on the file to shrink it. The predicate provided is
+    /// used to determine if a log record should or should not remain in the
+    /// file
+    ///
+    fn compact<F: Fn(&LogRecord) -> bool>(&mut self, predicate: &F) -> Result<()> {
+        if let Some(ref logger) = self.logger {
+            info!(logger, "Compacting file"; "file_number" => self.record.file_number);
+        }
+
+        let new_file_name = self.path.join(format!("{}.log.tmp", self.record.file_number));
+        let old_file_name = self.path.join(format!("{}.log", self.record.file_number));
+
+        let mut output_file = File::options().write(true).create(true).open(&new_file_name)?;
+
+        let file_iterator = FileIterator::new(self)?;
+
+        for record in file_iterator {
+            match record {
+                Ok((record, _)) => {
+                    if predicate(&record) {
+                        bincode::serialize_into(&output_file, &record)
+                            .map_err(|e| Error::other(e))?;
+                    }
+                }
+                Err(err) => {
+                    return Err(err);
+                }
+            }
+        }
+
+        let new_size = output_file.stream_len()?;
+
+        if let Some(ref logger) = self.logger {
+            info!(logger, "Compacted log file"; "file_name" => old_file_name.to_str(), "original_size" => self.file.stream_len()?, "new_size" => new_size);
+        }
+
+        std::fs::rename(&old_file_name, &new_file_name)?;
+        self.file = Arc::new(File::open(old_file_name)?);
         Ok(())
     }
 }
@@ -269,7 +318,7 @@ impl Log {
         }
 
         for record in manifest_records {
-            let log_file = LogFile::open(&logger, path.clone(), &record)?;
+            let log_file = LogFile::open(&logger, path.clone(), record)?;
             log_files.insert(log_file.record.min_index, log_file);
         }
 
@@ -467,26 +516,21 @@ impl Log {
     /// Issue a compaction against the log to eliminate old records. The
     /// predicate passed should return true for records which should be
     /// retained, and false for records which should be dropped from the log.
-    /// Records which are retained but written to a new file will be indicated
-    /// by a call to update with a map of key -> LogPosition values to update
-    /// the mapping with the new file location. Once the update is complete,
-    /// the old files can be deleted as there will be no outstanding references
-    /// after the update callback completes
     ///
     pub(crate) fn compact_log<F: Fn(&LogRecord) -> bool>(&mut self, predicate: F) -> Result<()> {
         if let Some(ref logger) = self.logger {
             info!(logger, "Starting compaction");
         }
 
-        let original_files = self.log_files.len();
-        for _ in 0..original_files {
-            self.compact_oldest_file(&predicate)?;
+        for log_file in self.log_files.values_mut() {
+            log_file.compact(&predicate)?;
         }
 
         if let Some(ref logger) = self.logger {
             info!(logger, "Finished compaction");
         }
 
+        // Once compaction has completed, write out the updated manifest with any updates
         Self::write_manifest(
             &self.logger,
             self.log_files
@@ -495,35 +539,6 @@ impl Log {
                 .collect(),
             &self.path,
         )
-    }
-
-    fn compact_oldest_file<F: Fn(&LogRecord) -> bool>(&mut self, predicate: &F) -> Result<()> {
-        if self.log_files.len() == 0 {
-            Ok(())
-        } else {
-            let (_, mut target_file) = self.log_files.pop_first().unwrap();
-
-            if let Some(ref logger) = self.logger {
-                info!(logger, "Compacting file"; "file_number" => target_file.record.file_number);
-            }
-
-            let file_iterator = FileIterator::new(&mut target_file)?;
-
-            for record in file_iterator {
-                match record {
-                    Ok((record, _)) => {
-                        if predicate(&record) {
-                            // TODO: Write to a new file, rather than using the main log
-                            self.write(record.operation)?;
-                        }
-                    }
-                    Err(err) => {
-                        return Err(err);
-                    }
-                }
-            }
-            Ok(())
-        }
     }
 
     ///
@@ -543,7 +558,7 @@ impl Log {
 
             self.log_files.insert(
                 first_index,
-                LogFile::create(&self.logger, self.path.clone(), &mut last_record)?,
+                LogFile::create(&self.logger, self.path.clone(), last_record)?,
             );
 
             // Flush the manifest so the log files are picked up on a reload
