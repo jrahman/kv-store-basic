@@ -159,6 +159,10 @@ impl LogFile {
         })
     }
 
+    ///
+    /// Read a log record from the file based on the LogRecord's index. Will
+    /// return an error if the index is not present in this log file
+    ///
     fn read(&mut self, index: u64) -> Result<LogRecord> {
         if let Some(ref logger) = self.logger {
             info!(logger, "Reading record"; "index" => index);
@@ -190,6 +194,10 @@ impl LogFile {
         }
 
         Ok(())
+    }
+
+    fn size(&self) -> Result<u64> {
+        Ok(self.file.metadata()?.len())
     }
 
     ///
@@ -371,7 +379,8 @@ impl Log {
     }
 
     ///
-    /// Write a new log record into the log. Returns the index in the log at which the record was written
+    /// Write a new log record into the log. Returns the index in the log at
+    /// which the record was written
     ///
     pub(crate) fn write(&mut self, operation: LogOperation) -> Result<u64> {
         if let Some(mut entry) = self.log_files.last_entry() {
