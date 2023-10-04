@@ -2,14 +2,17 @@ use slog::{info, Logger};
 use std::io::Result;
 use std::net::{TcpListener, TcpStream};
 
-pub struct KvsServer {
+use crate::engine::KvsEngine;
+
+pub struct KvsServer<Engine: KvsEngine> {
     addr: String,
     logger: Logger,
+    engine: Engine
 }
 
-impl KvsServer {
-    pub fn new(addr: String, logger: Logger) -> KvsServer {
-        KvsServer { addr, logger }
+impl<Engine: KvsEngine + Sync> KvsServer<Engine> {
+    pub fn new(addr: String, logger: Logger, engine: Engine) -> KvsServer<Engine> {
+        KvsServer { addr, logger, engine }
     }
 
     ///

@@ -1,6 +1,7 @@
-use std::net::{TcpListener, TcpStream};
+use std::{net::{TcpListener, TcpStream}, path::{Path, PathBuf}};
 
 use clap::Parser;
+use kvs::kv::KvStore;
 use slog::{o, Drain, Logger, info};
 use std::io::Result;
 
@@ -22,6 +23,8 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    let mut server = kvs::server::KvsServer::new(cli.addr, logger);
+    let kv_store = kvs::kv::KvStore::open(Some(logger.clone()), PathBuf::from("./log"))?;
+
+    let mut server = kvs::server::KvsServer::new(cli.addr, logger, kv_store);
     server.run()
 }
