@@ -1,22 +1,23 @@
 use slog::{info, Logger};
-use std::io::{BufReader, BufWriter, Error, ErrorKind, Result, Write};
+use std::io::{BufReader, BufWriter, Error, Result, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::Mutex;
 
 use crate::engine::KvsEngine;
-use crate::net::{GetResponse, Request, SetResponse, RmResponse, Exception};
+use crate::net::{Exception, GetResponse, Request, RmResponse, SetResponse};
 
 pub struct KvsServer<Engine: KvsEngine> {
     addr: String,
     logger: Logger,
-    engine: Engine,
+    engine: Mutex<Engine>,
 }
 
-impl<Engine: KvsEngine + Sync> KvsServer<Engine> {
+impl<Engine: KvsEngine + Sync + Send> KvsServer<Engine> {
     pub fn new(addr: String, logger: Logger, engine: Engine) -> KvsServer<Engine> {
         KvsServer {
             addr,
             logger,
-            engine,
+            engine: Mutex::new(engine),
         }
     }
 
@@ -39,10 +40,12 @@ impl<Engine: KvsEngine + Sync> KvsServer<Engine> {
         })
     }
 
-    fn process_connection(&mut self, connection: TcpStream) -> Result<()> {
-        info!(self.logger, "Received connection"; "remote_addr" => connection.peer_addr()?.to_string());
+    fn process_connection(&self, connection: TcpStream) -> Result<()> {
+        let peer_addr = connection.peer_addr()?.to_string();
 
-        let reader = BufReader::new(&connection);
+        info!(self.logger, "Received connection"; "remote_addr" => &peer_addr);
+
+        let mut reader = BufReader::new(&connection);
         let mut writer = BufWriter::new(&connection);
 
         macro_rules! send_response {
@@ -50,26 +53,43 @@ impl<Engine: KvsEngine + Sync> KvsServer<Engine> {
                 let resp = $resp;
                 bincode::serialize_into(&mut writer, &resp).map_err(|e| Error::other(e))?;
                 writer.flush()?;
+
+                info!(self.logger, "Sent response"; "remote_addr" => &peer_addr, "response" => format!("{}", resp));
             }};
         }
 
-        let request: Request =
-            bincode::deserialize_from(reader).map_err(|e| Error::other(e.to_string()))?;
-        match request {
-            Request::Set { key, value } => send_response!(match self.engine.set(key, value) {
-                Ok(()) => SetResponse::Ok(()),
-                Err(err) => SetResponse::Error(Exception{what: err.to_string()}),
-            }),
-            Request::Get { key } => send_response!(match self.engine.get(key) {
-                Ok(value) => GetResponse::Ok(value),
-                Err(err) => GetResponse::Error(Exception{what: err.to_string()}),
-            }),
-            Request::Rm { key } => send_response!(match self.engine.remove(key) {
-                Ok(_) => RmResponse::Ok(()),
-                Err(err) => RmResponse::Error(Exception{what: err.to_string()}),
-            }),
-        };
+        loop {
+            let request: Request =
+                bincode::deserialize_from(&mut reader).map_err(|e| Error::other(e.to_string()))?;
 
-        Ok(())
+            info!(self.logger, "Received request"; "remote_addr" => &peer_addr, "request" => format!("{}", request));
+
+            match request {
+                Request::Set { key, value } => {
+                    send_response!(match self.engine.lock().unwrap().set(key, value) {
+                        Ok(()) => SetResponse::Ok(()),
+                        Err(err) => SetResponse::Error(Exception {
+                            what: err.to_string()
+                        }),
+                    })
+                }
+                Request::Get { key } => {
+                    send_response!(match self.engine.lock().unwrap().get(key) {
+                        Ok(value) => GetResponse::Ok(value),
+                        Err(err) => GetResponse::Error(Exception {
+                            what: err.to_string()
+                        }),
+                    })
+                }
+                Request::Rm { key } => {
+                    send_response!(match self.engine.lock().unwrap().remove(key) {
+                        Ok(_) => RmResponse::Ok(()),
+                        Err(err) => RmResponse::Error(Exception {
+                            what: err.to_string()
+                        }),
+                    })
+                }
+            };
+        }
     }
 }
