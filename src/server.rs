@@ -1,18 +1,23 @@
 use slog::{info, Logger};
-use std::io::Result;
+use std::io::{BufReader, BufWriter, Error, ErrorKind, Result, Write};
 use std::net::{TcpListener, TcpStream};
 
 use crate::engine::KvsEngine;
+use crate::net::{GetResponse, Request, SetResponse, RmResponse, Exception};
 
 pub struct KvsServer<Engine: KvsEngine> {
     addr: String,
     logger: Logger,
-    engine: Engine
+    engine: Engine,
 }
 
 impl<Engine: KvsEngine + Sync> KvsServer<Engine> {
     pub fn new(addr: String, logger: Logger, engine: Engine) -> KvsServer<Engine> {
-        KvsServer { addr, logger, engine }
+        KvsServer {
+            addr,
+            logger,
+            engine,
+        }
     }
 
     ///
@@ -34,8 +39,37 @@ impl<Engine: KvsEngine + Sync> KvsServer<Engine> {
         })
     }
 
-    fn process_connection(&self, connection: TcpStream) -> Result<()> {
+    fn process_connection(&mut self, connection: TcpStream) -> Result<()> {
         info!(self.logger, "Received connection"; "remote_addr" => connection.peer_addr()?.to_string());
-        loop {}
+
+        let reader = BufReader::new(&connection);
+        let mut writer = BufWriter::new(&connection);
+
+        macro_rules! send_response {
+            ($resp:expr) => {{
+                let resp = $resp;
+                bincode::serialize_into(&mut writer, &resp).map_err(|e| Error::other(e))?;
+                writer.flush()?;
+            }};
+        }
+
+        let request: Request =
+            bincode::deserialize_from(reader).map_err(|e| Error::other(e.to_string()))?;
+        match request {
+            Request::Set { key, value } => send_response!(match self.engine.set(key, value) {
+                Ok(()) => SetResponse::Ok(()),
+                Err(err) => SetResponse::Error(Exception{what: err.to_string()}),
+            }),
+            Request::Get { key } => send_response!(match self.engine.get(key) {
+                Ok(value) => GetResponse::Ok(value),
+                Err(err) => GetResponse::Error(Exception{what: err.to_string()}),
+            }),
+            Request::Rm { key } => send_response!(match self.engine.remove(key) {
+                Ok(_) => RmResponse::Ok(()),
+                Err(err) => RmResponse::Error(Exception{what: err.to_string()}),
+            }),
+        };
+
+        Ok(())
     }
 }

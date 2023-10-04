@@ -6,24 +6,40 @@ use serde::{Deserialize, Serialize};
 /// Message sent to server for each request
 /// 
 #[derive(Serialize, Deserialize)]
-enum Request {
+pub(crate) enum Request {
     Set {key: String, value: String},
     Get {key: String},
     Rm {key: String},
 }
 
 #[derive(Serialize, Deserialize)]
-struct Exception {
-    what: String
+pub(crate) struct Exception {
+    pub(crate) what: String
 }
 
 ///
-/// Response received back from server. Could be an errors
+/// Response received back from server. Could be an error
 /// 
 #[derive(Serialize, Deserialize)]
-enum Response {
-    Set,
-    Get {value: String},
-    Rm,
+pub(crate) enum GetResponse {
+    Ok(Option<String>),
+    Error(Exception)
+}
+
+///
+/// Response received back from server. Could be an error
+/// 
+#[derive(Serialize, Deserialize)]
+pub(crate) enum SetResponse {
+    Ok(()),
+    Error(Exception)
+}
+
+///
+/// Response received back from server. Could be an error
+/// 
+#[derive(Serialize, Deserialize)]
+pub(crate) enum RmResponse {
+    Ok(()),
     Error(Exception)
 }
