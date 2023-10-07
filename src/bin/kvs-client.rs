@@ -1,7 +1,9 @@
-
+use std::io::Result;
 
 use clap::{Parser, Subcommand};
 use slog::{Drain, o};
+
+use kvs::client::KvsClient;
 
 #[derive(Debug, Parser)] // requires `derive` feature
 #[command(name = env!("CARGO_PKG_NAME"), about = env!("CARGO_PKG_DESCRIPTION"), author = env!("CARGO_PKG_AUTHORS"), version = env!("CARGO_PKG_VERSION"))]
@@ -37,7 +39,7 @@ enum Commands {
     },
 }
 
-fn main() {
+fn main() -> Result<()> {
     let decorator = slog_term::PlainDecorator::new(std::io::stdout());
     let drain = slog_term::CompactFormat::new(decorator).build().fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
@@ -47,13 +49,17 @@ fn main() {
 
     match cli.command {
         Commands::Get { key, addr } => {
-
+            let mut client = KvsClient::new(logger, addr)?;
+            client.get(key)?;
         },
         Commands::Set { key, value, addr } => {
-
+            let mut client = KvsClient::new(logger, addr)?;
+            client.set(key, value)?;
         }
         Commands::Rm { key, addr } => {
-
+            let mut client = KvsClient::new(logger, addr)?;
+            client.rm(key)?;
         }
-    }
+    };
+    Ok(())
 }

@@ -66,7 +66,7 @@ impl<Engine: KvsEngine + Sync + Send> KvsServer<Engine> {
             match request {
                 Request::Set(cmd) => {
                     send_response!(match self.engine.lock().unwrap().set(cmd.key, cmd.value) {
-                        Ok(()) => SetResponse::Ok(()),
+                        Ok(value) => SetResponse::Ok(value),
                         Err(err) => SetResponse::Error(Exception {
                             what: err.to_string()
                         }),
@@ -82,7 +82,7 @@ impl<Engine: KvsEngine + Sync + Send> KvsServer<Engine> {
                 }
                 Request::Rm(cmd) => {
                     send_response!(match self.engine.lock().unwrap().remove(cmd.key) {
-                        Ok(_) => RmResponse::Ok(()),
+                        Ok(value) => RmResponse::Ok(value),
                         Err(err) => RmResponse::Error(Exception {
                             what: err.to_string()
                         }),

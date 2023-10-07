@@ -1,4 +1,4 @@
-use std::{net::{TcpListener, TcpStream}, path::{Path, PathBuf}};
+use std::path::PathBuf;
 
 use clap::Parser;
 use kvs::kv::KvStore;
