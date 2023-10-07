@@ -4,7 +4,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::Mutex;
 
 use crate::engine::KvsEngine;
-use crate::net::{Exception, GetResponse, Request, RmResponse, SetResponse};
+use crate::net::{Exception, GetResponse, Request, RmResponse, SetResponse, GetRequest, SetRequest};
 
 pub struct KvsServer<Engine: KvsEngine> {
     addr: String,
@@ -53,7 +53,6 @@ impl<Engine: KvsEngine + Sync + Send> KvsServer<Engine> {
                 let resp = $resp;
                 bincode::serialize_into(&mut writer, &resp).map_err(|e| Error::other(e))?;
                 writer.flush()?;
-
                 info!(self.logger, "Sent response"; "remote_addr" => &peer_addr, "response" => format!("{}", resp));
             }};
         }
@@ -65,24 +64,24 @@ impl<Engine: KvsEngine + Sync + Send> KvsServer<Engine> {
             info!(self.logger, "Received request"; "remote_addr" => &peer_addr, "request" => format!("{}", request));
 
             match request {
-                Request::Set { key, value } => {
-                    send_response!(match self.engine.lock().unwrap().set(key, value) {
+                Request::Set(cmd) => {
+                    send_response!(match self.engine.lock().unwrap().set(cmd.key, cmd.value) {
                         Ok(()) => SetResponse::Ok(()),
                         Err(err) => SetResponse::Error(Exception {
                             what: err.to_string()
                         }),
                     })
                 }
-                Request::Get { key } => {
-                    send_response!(match self.engine.lock().unwrap().get(key) {
+                Request::Get(cmd) => {
+                    send_response!(match self.engine.lock().unwrap().get(cmd.key) {
                         Ok(value) => GetResponse::Ok(value),
                         Err(err) => GetResponse::Error(Exception {
                             what: err.to_string()
                         }),
                     })
                 }
-                Request::Rm { key } => {
-                    send_response!(match self.engine.lock().unwrap().remove(key) {
+                Request::Rm(cmd) => {
+                    send_response!(match self.engine.lock().unwrap().remove(cmd.key) {
                         Ok(_) => RmResponse::Ok(()),
                         Err(err) => RmResponse::Error(Exception {
                             what: err.to_string()
