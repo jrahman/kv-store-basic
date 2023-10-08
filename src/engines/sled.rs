@@ -11,7 +11,7 @@ pub struct SledKvStore {
 }
 
 impl SledKvStore {
-    fn new<P: AsRef<Path>>(path: P) -> Result<SledKvStore> {
+   pub fn open<P: AsRef<Path>>(path: P) -> Result<SledKvStore> {
         let db = sled::open(path)?;
         Ok(SledKvStore { db })
     }

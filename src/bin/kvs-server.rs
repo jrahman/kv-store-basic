@@ -1,7 +1,13 @@
-use std::path::PathBuf;
+use std::{
+    io::Error,
+    path::{Path, PathBuf},
+};
 
 use clap::Parser;
-use kvs::{engines::KvStore, server::KvsServer};
+use kvs::{
+    engines::{KvStore, SledKvStore},
+    server::KvsServer,
+};
 use slog::{o, Drain};
 use std::io::Result;
 
@@ -23,8 +29,16 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    let kv_store = KvStore::open(Some(logger.clone()), PathBuf::from("./log"))?;
-
-    let mut server = KvsServer::new(cli.addr, logger, kv_store);
-    server.run()
+    match cli.engine.unwrap().as_str() {
+        "kvs" => Ok(KvsServer::new(
+            cli.addr,
+            logger.clone(),
+            KvStore::open(Some(logger), PathBuf::from("./log"))?,
+        )
+        .run()?),
+        "sled" => Ok(
+            KvsServer::new(cli.addr, logger, SledKvStore::open(PathBuf::from("./log"))?).run()?,
+        ),
+        _ => Err(Error::other("Unknown storage engine")),
+    }
 }
