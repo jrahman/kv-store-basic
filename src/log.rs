@@ -355,7 +355,7 @@ impl Log {
 
         Ok(Self {
             log_files,
-            next_index: AtomicU64::new(last_index + 1),
+            next_index: AtomicU64::new(last_index.min(u64::MAX - 1) + 1),
             logger,
             path,
         })
@@ -417,15 +417,14 @@ impl Log {
     }
 
     pub(crate) fn total_size(&self) -> Result<u64> {
-        self
-        .log_files
-        .values()
-        .map(|lf| lf.size())
-        .fold(Ok(0), |acc, elem| match (acc, elem) {
-            (Ok(acc), Ok(elem)) => Ok(acc + elem),
-            (Err(acc), _) => Err(acc),
-            (_, Err(elem)) => Err(elem),
-        })
+        self.log_files
+            .values()
+            .map(|lf| lf.size())
+            .fold(Ok(0), |acc, elem| match (acc, elem) {
+                (Ok(acc), Ok(elem)) => Ok(acc + elem),
+                (Err(acc), _) => Err(acc),
+                (_, Err(elem)) => Err(elem),
+            })
     }
 
     ///

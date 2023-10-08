@@ -1,9 +1,9 @@
-use std::io::{BufReader, BufWriter, Error, Result};
+use std::io::{BufReader, BufWriter, Error, Result, Write};
 use std::net::TcpStream;
 
 use slog::{info, Logger};
 
-use crate::net::{GetRequest, RmRequest, SetRequest, GetResponse, SetResponse, RmResponse};
+use crate::net::{GetRequest, GetResponse, RmRequest, RmResponse, SetRequest, SetResponse, Request};
 
 pub struct KvsClient {
     addr: String,
@@ -14,14 +14,18 @@ pub struct KvsClient {
 
 macro_rules! send_request {
     ($self:expr, $req: ident, $resp: ident, $($arg:tt),+) => {{
-        info!(&$self.logger, "Sending request"; "addr" => &$self.addr);
+        info!($self.logger, "Sending request"; "addr" => &$self.addr);
 
-        bincode::serialize_into(&mut $self.writer, &$req{$($arg),+})
+        bincode::serialize_into(&mut $self.writer, &Request::from($req{$($arg),+}))
             .map_err(|e| Error::other(e.to_string()))?;
+        $self.writer.flush()?;
+
+        info!($self.logger, "Sent request, waiting for response");
+
         let response: $resp =
             bincode::deserialize_from(&mut $self.reader).map_err(|e| Error::other(e.to_string()))?;
 
-        info!(&$self.logger, "Received response");
+        info!($self.logger, "Received response");
 
         match response {
             $resp::Ok(value) => Ok(value),
@@ -56,5 +60,4 @@ impl KvsClient {
     pub fn rm(&mut self, key: String) -> Result<()> {
         send_request!(self, RmRequest, RmResponse, key)
     }
-
 }

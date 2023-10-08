@@ -1,6 +1,6 @@
 use std::{
     io::Error,
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
 
 use clap::Parser;
@@ -29,7 +29,7 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    match cli.engine.unwrap().as_str() {
+    match cli.engine.unwrap_or("".to_string()).as_str() {
         "kvs" => Ok(KvsServer::new(
             cli.addr,
             logger.clone(),

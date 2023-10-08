@@ -27,7 +27,7 @@ impl<Engine: KvsEngine + Sync + Send> KvsServer<Engine> {
     /// parallel
     ///
     pub fn run(&mut self) -> Result<()> {
-        let listener = TcpListener::bind("127.0.0.1:6379")?;
+        let listener = TcpListener::bind(&self.addr)?;
 
         info!(self.logger, "Starting server"; "addr" => &self.addr);
 
@@ -58,6 +58,8 @@ impl<Engine: KvsEngine + Sync + Send> KvsServer<Engine> {
         }
 
         loop {
+            info!(self.logger, "Waiting for request");
+
             let request: Request =
                 bincode::deserialize_from(&mut reader).map_err(|e| Error::other(e.to_string()))?;
 
