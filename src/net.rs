@@ -48,7 +48,11 @@ pub(crate) struct RmRequest {
 
 impl Display for Request {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("{}", self))
+        match self {
+            Request::Set(set) => f.write_fmt(format_args!("{:?}", set)),
+            Request::Get(get) => f.write_fmt(format_args!("{:?}", get)),
+            Request::Rm(rm) => f.write_fmt(format_args!("{:?}", rm)),
+        }
     }
 }
 
@@ -68,7 +72,12 @@ pub(crate) enum GetResponse {
 
 impl Display for GetResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("{}", self))
+        match self {
+            GetResponse::Ok(_) => f.write_fmt(format_args!("GetResponse::Ok")),
+            GetResponse::Error(err) => {
+                f.write_fmt(format_args!("GetResponse::Error({})", err.what))
+            }
+        }
     }
 }
 
@@ -83,7 +92,12 @@ pub(crate) enum SetResponse {
 
 impl Display for SetResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("{}", self))
+        match self {
+            SetResponse::Ok(_) => f.write_fmt(format_args!("SetResponse::Ok")),
+            SetResponse::Error(err) => {
+                f.write_fmt(format_args!("SetResponse::Error({})", err.what))
+            }
+        }
     }
 }
 
@@ -98,6 +112,9 @@ pub(crate) enum RmResponse {
 
 impl Display for RmResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("{}", self))
+        match self {
+            RmResponse::Ok(_) => f.write_fmt(format_args!("RmResponse::Ok")),
+            RmResponse::Error(err) => f.write_fmt(format_args!("RmResponse::Error({})", err.what)),
+        }
     }
 }
