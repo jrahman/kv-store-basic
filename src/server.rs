@@ -1,10 +1,10 @@
-use slog::{info, Logger};
+use slog::{error, info, Logger};
 use std::io::{BufReader, BufWriter, Error, Result, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Mutex;
 
 use crate::engines::KvsEngine;
-use crate::net::{Exception, Request, GetResponse, RmResponse, SetResponse};
+use crate::net::{Exception, GetResponse, Request, RmResponse, SetResponse};
 
 pub struct KvsServer<Engine: KvsEngine> {
     addr: String,
@@ -34,7 +34,12 @@ impl<Engine: KvsEngine + Sync + Send> KvsServer<Engine> {
         std::thread::scope(|s| -> Result<()> {
             for stream in listener.incoming() {
                 let connection = stream?;
-                s.spawn(|| self.process_connection(connection));
+                s.spawn(|| {
+                    match self.process_connection(connection) {
+                        Ok(()) => {},
+                        Err(err) => error!(self.logger, "Error while processing connection"; "error" => err.to_string())
+                    }
+                });
             }
             Ok(())
         })
@@ -45,8 +50,8 @@ impl<Engine: KvsEngine + Sync + Send> KvsServer<Engine> {
 
         info!(self.logger, "Received connection"; "remote_addr" => &peer_addr);
 
-        let mut reader = BufReader::new(&connection);
-        let mut writer = BufWriter::new(&connection);
+        let mut reader = BufReader::new(connection.try_clone()?);
+        let mut writer = BufWriter::new(connection);
 
         macro_rules! send_response {
             ($resp:expr) => {{
