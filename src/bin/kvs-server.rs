@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use kvs::kv::KvStore;
-use slog::{o, Drain, Logger, info};
+use kvs::{engines::KvStore, server::KvsServer};
+use slog::{o, Drain};
 use std::io::Result;
 
 #[derive(Parser)] // requires `derive` feature
@@ -23,8 +23,8 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    let kv_store = kvs::kv::KvStore::open(Some(logger.clone()), PathBuf::from("./log"))?;
+    let kv_store = KvStore::open(Some(logger.clone()), PathBuf::from("./log"))?;
 
-    let mut server = kvs::server::KvsServer::new(cli.addr, logger, kv_store);
+    let mut server = KvsServer::new(cli.addr, logger, kv_store);
     server.run()
 }

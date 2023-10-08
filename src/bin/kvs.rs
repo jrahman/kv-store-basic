@@ -3,10 +3,9 @@ use std::io::Write;
 use std::path::Path;
 
 use clap::{Parser, Subcommand};
+use kvs::engines::KvsEngine;
 use slog::o;
 use slog::Drain;
-
-use kvs::engine::KvsEngine;
 
 #[derive(Debug, Parser)] // requires `derive` feature
 #[command(name = env!("CARGO_PKG_NAME"), about = env!("CARGO_PKG_DESCRIPTION"), author = env!("CARGO_PKG_AUTHORS"), version = env!("CARGO_PKG_VERSION"))]
@@ -42,7 +41,7 @@ fn main() -> Result<()> {
     let logger = slog::Logger::root(drain, o!("module" => "Log"));
 
     let path = Path::new("./log");
-    let mut kvs = kvs::kv::KvStore::open(Some(logger), path.to_path_buf())?;
+    let mut kvs = kvs::engines::KvStore::open(Some(logger), path.to_path_buf())?;
 
     writeln!(std::io::stdout(), "Finished opening kvstore")?;
 

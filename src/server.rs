@@ -3,8 +3,8 @@ use std::io::{BufReader, BufWriter, Error, Result, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Mutex;
 
-use crate::engine::KvsEngine;
-use crate::net::{Exception, GetResponse, Request, RmResponse, SetResponse, GetRequest, SetRequest};
+use crate::engines::KvsEngine;
+use crate::net::{Exception, Request, GetResponse, RmResponse, SetResponse};
 
 pub struct KvsServer<Engine: KvsEngine> {
     addr: String,
