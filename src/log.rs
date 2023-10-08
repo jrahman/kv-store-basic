@@ -316,6 +316,8 @@ impl Log {
 
         let mut manifest_records = Self::read_manifest(&logger, path.clone())?;
 
+        let mut next_index = 0;
+
         // Upon the first load, create an empty manifest and add a single log file to it
         if manifest_records.is_empty() {
             let log_file_path = path.join("0.log");
@@ -326,36 +328,33 @@ impl Log {
             File::create(log_file_path)?;
             manifest_records.push(FileManifestRecord {
                 file_number: 0,
-                max_index: u64::MAX,
+                max_index: u64::MIN,
                 min_index: u64::MIN,
             });
+            next_index = 0;
             Self::write_manifest(&logger, manifest_records.clone(), &path)?;
-        }
 
-        for record in manifest_records {
-            let log_file = LogFile::open(&logger, path.clone(), record)?;
+            let log_file = LogFile::open(&logger, path.clone(), *manifest_records.get(0).unwrap())?;
             log_files.insert(log_file.manifest_record.min_index, log_file);
-        }
+        } else {
+            for record in manifest_records {
+                let log_file = LogFile::open(&logger, path.clone(), record)?;
+                log_files.insert(log_file.manifest_record.min_index, log_file);
+            }
 
-        let mut last_index = log_files
-            .last_key_value()
-            .map_or(0, |(_, log_file)| log_file.manifest_record.max_index);
-
-        // The final file must be scanned over if it was a partial file open
-        // upon last process exit. In such a case, the max_index = u64::max
-        // indicating the file was not closed gracefully with a manifest write
-        // with the up to date values
-        if let Some(entry) = log_files.last_entry() {
-            last_index = entry.get().manifest_record.max_index;
+            next_index = log_files
+                .last_key_value()
+                .map_or(0, |(_, log_file)| log_file.manifest_record.max_index)
+                + 1;
         }
 
         if let Some(ref logger) = logger {
-            info!(logger, "Completed manifest scan"; "max_index" => last_index);
+            info!(logger, "Completed manifest scan"; "max_index" => next_index);
         }
 
         Ok(Self {
             log_files,
-            next_index: AtomicU64::new(last_index.min(u64::MAX - 1) + 1),
+            next_index: AtomicU64::new(next_index),
             logger,
             path,
         })
@@ -370,7 +369,7 @@ impl Log {
         }
         match self
             .log_files
-            .lower_bound_mut(std::ops::Bound::Included(&index))
+            .upper_bound_mut(std::ops::Bound::Included(&index))
             .value_mut()
         {
             Some(entry) => Ok(entry.read(index)?),
