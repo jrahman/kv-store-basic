@@ -1,15 +1,33 @@
-use std::io::{Error, Result};
+use std::io::{BufReader, BufWriter, Error, Result};
 use std::net::TcpStream;
 
-use serde::Serialize;
 use slog::{info, Logger};
 
-use crate::net::{GetRequest, KVRequest, Response, RmRequest, SetRequest};
+use crate::net::{GetRequest, RmRequest, SetRequest, GetResponse, SetResponse, RmResponse};
 
 pub struct KvsClient {
     addr: String,
-    conn: Option<TcpStream>,
+    reader: BufReader<TcpStream>,
+    writer: BufWriter<TcpStream>,
     logger: Logger,
+}
+
+macro_rules! send_request {
+    ($self:expr, $req: ident, $resp: ident, $($arg:tt),+) => {{
+        info!(&$self.logger, "Sending request"; "addr" => &$self.addr);
+
+        bincode::serialize_into(&mut $self.writer, &$req{$($arg),+})
+            .map_err(|e| Error::other(e.to_string()))?;
+        let response: $resp =
+            bincode::deserialize_from(&mut $self.reader).map_err(|e| Error::other(e.to_string()))?;
+
+        info!(&$self.logger, "Received response");
+
+        match response {
+            $resp::Ok(value) => Ok(value),
+            $resp::Error(err) => Err(Error::other(err.what))
+        }
+    }};
 }
 
 ///
@@ -17,47 +35,26 @@ pub struct KvsClient {
 ///
 impl KvsClient {
     pub fn new(logger: Logger, addr: String) -> Result<KvsClient> {
-        let conn = Some(TcpStream::connect(&addr)?);
+        let conn = TcpStream::connect(&addr)?;
 
-        Ok(KvsClient { addr, conn, logger })
+        Ok(KvsClient {
+            addr,
+            reader: BufReader::new(conn.try_clone()?),
+            writer: BufWriter::new(conn),
+            logger,
+        })
     }
 
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
-        self.send_request(GetRequest { key })
+        send_request!(self, GetRequest, GetResponse, key)
     }
 
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
-        self.send_request(SetRequest { key, value })
+        send_request!(self, SetRequest, SetResponse, key, value)
     }
 
     pub fn rm(&mut self, key: String) -> Result<()> {
-        self.send_request(RmRequest { key })
+        send_request!(self, RmRequest, RmResponse, key)
     }
 
-    fn send_request<R: KVRequest + Serialize>(
-        &mut self,
-        request: R,
-    ) -> Result<<<R as KVRequest>::Response as Response>::T> {
-        info!(&self.logger, "Sending request"; "addr" => &self.addr);
-
-        let mut conn = self.get_conn()?;
-        bincode::serialize_into(&mut conn, &request.to_request())
-            .map_err(|e| Error::other(e.to_string()))?;
-        let response: R::Response =
-            bincode::deserialize_from(&mut conn).map_err(|e| Error::other(e.to_string()))?;
-
-        info!(&self.logger, "Received response");
-        
-        response.to_result()
-    }
-
-    fn get_conn(&mut self) -> Result<&mut TcpStream> {
-        Ok(match self.conn {
-            Some(ref mut conn) => conn,
-            None => {
-                let conn = TcpStream::connect(&self.addr)?;
-                self.conn.get_or_insert(conn)
-            }
-        })
-    }
 }
