@@ -20,3 +20,9 @@ assert_cmd = "0.11.0"
 predicates = "1.0.0"
 tempfile = "3.0.7"
 walkdir = "2.2.7"
+criterion = "0.3"
+rand = "*"
+
+[[bench]]
+name = "kvs_benchmark"
+harness = false
