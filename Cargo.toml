@@ -14,6 +14,7 @@ slog = "*"
 slog-term = "*"
 slog-async = "*"
 sled = "0.34.6"
+crossbeam = "*"
 
 [dev-dependencies]
 assert_cmd = "0.11.0"
@@ -22,6 +23,7 @@ tempfile = "3.0.7"
 walkdir = "2.2.7"
 criterion = "0.3"
 rand = "*"
+crossbeam_utils = "*"
 
 [[bench]]
 name = "kvs_benchmark"
