@@ -1,4 +1,6 @@
-use kvs::{kv::KvStore, kvs::KvsEngine, Result};
+use std::io::Result;
+
+use kvs::{engines::KvStore, engines::KvsEngine};
 use tempfile::TempDir;
 use walkdir::WalkDir;
 

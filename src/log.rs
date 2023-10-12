@@ -5,7 +5,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Error, ErrorKind, Result, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 extern crate slog;
 extern crate slog_async;
@@ -65,6 +65,7 @@ struct FileManifestRecord {
 /// In-memory representation for a log file, including metadata on the file
 /// itself such as the maximum index and the file number
 ///
+#[derive(Clone)]
 struct LogFile {
     // Metadata on the file manifest contents for this log file
     manifest_record: FileManifestRecord,
@@ -253,32 +254,32 @@ impl LogFile {
 ///
 /// Implements iteration over a single log file
 ///
-struct FileIterator<'a> {
+struct FileIterator {
     // Pointer to the file to be read from
-    log_file: Arc<File>,
+    log_file: File,
 
     // Next offset in the file to read a record from
-    iter: std::collections::hash_map::Iter<'a, u64, u64>,
+    iter: std::collections::hash_map::IntoIter<u64, u64>,
 }
 
-impl<'a> FileIterator<'a> {
+impl FileIterator {
     fn new(log_file: &LogFile) -> Result<FileIterator> {
         Ok(FileIterator {
-            log_file: log_file.file.clone(),
-            iter: log_file.index_map.iter(),
+            log_file: File::try_clone(&log_file.file)?,
+            iter: log_file.index_map.clone().into_iter(),
         })
     }
 }
 
-impl<'a> Iterator for FileIterator<'a> {
+impl Iterator for FileIterator {
     type Item = Result<(LogRecord, u64)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.iter.next() {
-            Some((_, offset)) => match self.log_file.seek(SeekFrom::Start(*offset)) {
+            Some((_, offset)) => match self.log_file.seek(SeekFrom::Start(offset)) {
                 Ok(_) => {
                     let record: LogRecord = bincode::deserialize_from(&mut self.log_file).unwrap();
-                    Some(Ok((record, *offset)))
+                    Some(Ok((record, offset)))
                 }
                 Err(err) => Some(Err(err)),
             },
@@ -296,7 +297,7 @@ pub(crate) struct Log {
     // Ordered log files, in increasing index number, the last file in the
     // BTreeMap is the current file being appended into. The key is the
     // smallest index associated with the LogFile
-    log_files: BTreeMap<u64, LogFile>,
+    log_files: Mutex<BTreeMap<u64, LogFile>>,
 
     // Next index number for the next write to the log
     next_index: AtomicU64,
@@ -316,7 +317,7 @@ impl Log {
 
         let mut manifest_records = Self::read_manifest(&logger, path.clone())?;
 
-        let mut next_index = 0;
+        let next_index;
 
         // Upon the first load, create an empty manifest and add a single log file to it
         if manifest_records.is_empty() {
@@ -353,7 +354,7 @@ impl Log {
         }
 
         Ok(Self {
-            log_files,
+            log_files: Mutex::new(log_files),
             next_index: AtomicU64::new(next_index),
             logger,
             path,
@@ -363,12 +364,12 @@ impl Log {
     ///
     /// Read a LogRecord from the underlying file at a given location
     ///
-    pub(crate) fn read(&mut self, index: u64) -> Result<LogRecord> {
+    pub(crate) fn read(&self, index: u64) -> Result<LogRecord> {
         if let Some(ref logger) = self.logger {
             info!(logger, "Reading log"; "index" => index);
         }
-        match self
-            .log_files
+        let mut log_files = self.log_files.lock().unwrap();
+        match log_files
             .upper_bound_mut(std::ops::Bound::Included(&index))
             .value_mut()
         {
@@ -381,8 +382,9 @@ impl Log {
     /// Write a new log record into the log. Returns the index in the log at
     /// which the record was written
     ///
-    pub(crate) fn write(&mut self, operation: LogOperation) -> Result<u64> {
-        if let Some(mut entry) = self.log_files.last_entry() {
+    pub(crate) fn write(&self, operation: LogOperation) -> Result<u64> {
+        let mut log_files = self.log_files.lock().unwrap();
+        if let Some(mut entry) = log_files.last_entry() {
             let tail_file = entry.get_mut();
 
             let record = LogRecord {
@@ -416,7 +418,8 @@ impl Log {
     }
 
     pub(crate) fn total_size(&self) -> Result<u64> {
-        self.log_files
+        let log_files = self.log_files.lock().unwrap();
+        log_files
             .values()
             .map(|lf| lf.size())
             .fold(Ok(0), |acc, elem| match (acc, elem) {
@@ -541,12 +544,14 @@ impl Log {
     /// predicate passed should return true for records which should be
     /// retained, and false for records which should be dropped from the log.
     ///
-    pub(crate) fn compact_log<F: Fn(&LogRecord) -> bool>(&mut self, predicate: F) -> Result<()> {
+    pub(crate) fn compact_log<F: Fn(&LogRecord) -> bool>(&self, predicate: F) -> Result<()> {
         if let Some(ref logger) = self.logger {
             info!(logger, "Starting compaction");
         }
 
-        for log_file in self.log_files.values_mut() {
+        let mut log_files = self.log_files.lock().unwrap();
+
+        for log_file in log_files.values_mut() {
             log_file.compact(&predicate)?;
         }
 
@@ -557,7 +562,7 @@ impl Log {
         // Once compaction has completed, write out the updated manifest with any updates
         Self::write_manifest(
             &self.logger,
-            self.log_files
+            log_files
                 .iter()
                 .map(|(_, log_file)| log_file.manifest_record)
                 .collect(),
@@ -569,7 +574,9 @@ impl Log {
     /// Close the final file, flushing the manifest
     ///
     fn seal_last_file(&mut self) -> Result<()> {
-        if let Some(mut entry) = self.log_files.last_entry() {
+        let mut log_files = self.log_files.lock().unwrap();
+
+        if let Some(mut entry) = log_files.last_entry() {
             let log_file = entry.get_mut();
             log_file.manifest_record.max_index =
                 self.next_index.load(std::sync::atomic::Ordering::SeqCst) - 1;
@@ -580,7 +587,7 @@ impl Log {
             last_record.max_index = u64::MAX;
             let first_index = last_record.min_index;
 
-            self.log_files.insert(
+            log_files.insert(
                 first_index,
                 LogFile::create(&self.logger, self.path.clone(), last_record)?,
             );
@@ -590,7 +597,7 @@ impl Log {
             // previous last file, and the newly added tail file
             Self::write_manifest(
                 &self.logger,
-                self.log_files
+                log_files
                     .iter()
                     .map(|(_, log_file)| log_file.manifest_record)
                     .collect(),
@@ -603,11 +610,12 @@ impl Log {
 
 impl Drop for Log {
     fn drop(&mut self) {
+        let log_files = self.log_files.lock().unwrap();
+
         // Write manifest out as best effort, recovery process on startup can
         // properly scan a final file which was not sealed with a final
         // version number on shutdown.
-        let records = self
-            .log_files
+        let records = log_files
             .iter()
             .map(|(_, log_file)| log_file.manifest_record)
             .collect();
@@ -621,29 +629,34 @@ impl Drop for Log {
 /// will be strictly increasing for each log record returned, though gaps
 /// are likely to occur due to compaction on the log
 ///
-pub(crate) struct LogIterator<'a> {
-    file_iterator: std::collections::btree_map::Iter<'a, u64, LogFile>,
-    record_iterator: FileIterator<'a>,
+pub(crate) struct LogIterator {
+    file_iterator: std::collections::btree_map::IntoIter<u64, LogFile>,
+    record_iterator: FileIterator,
 }
 
-impl<'a> LogIterator<'a> {
-    fn new(log: &'a mut Log) -> Result<LogIterator> {
-        let mut file_iterator = log.log_files.iter();
-        let record_iterator = FileIterator::new(&mut file_iterator.next().unwrap().1)?;
+impl LogIterator {
+    fn new(log: &mut Log) -> Result<LogIterator> {
+        let mut file_map = log
+            .log_files
+            .lock()
+            .map_err(|e| Error::other(e.to_string()))?
+            .clone();
+        let record_iterator = FileIterator::new(file_map.first_entry().unwrap().get())?;
+
         Ok(LogIterator {
             record_iterator,
-            file_iterator,
+            file_iterator: file_map.into_iter(),
         })
     }
 }
 
-impl<'a> Iterator for LogIterator<'a> {
+impl Iterator for LogIterator {
     type Item = Result<LogRecord>;
 
     fn next(&mut self) -> Option<Self::Item> {
         // Move to next file (or stop iteration)
         match self.record_iterator.next() {
-            Some(value) => Some(value.map(|(log_record, _)| log_record)),
+            Some(value) => Some(value.map(|e| e.0)),
             None => {
                 // Move to next file in the log
                 // TODO address a bug here with missing values on log file transition

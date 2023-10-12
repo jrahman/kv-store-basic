@@ -41,7 +41,7 @@ fn main() -> Result<()> {
     let logger = slog::Logger::root(drain, o!("module" => "Log"));
 
     let path = Path::new("./log");
-    let mut kvs = kvs::engines::KvStore::open(Some(logger), path.to_path_buf())?;
+    let kvs = kvs::engines::KvStore::open(Some(logger), path.to_path_buf())?;
 
     writeln!(std::io::stdout(), "Finished opening kvstore")?;
 

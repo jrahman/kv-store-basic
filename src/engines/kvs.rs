@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 use std::io::{ErrorKind, Result};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::Mutex;
 
+use crate::engines::KvsEngine;
 use crate::log::LogOperation::{self, Rm, Set};
 use crate::log::{Log, LogRecord};
-use crate::engines::KvsEngine;
 
-use slog::{o, Logger, info};
+use slog::{o, Logger};
 
-///
-pub struct KvStore {
+struct State {
     log: Log,
 
     ///
@@ -17,9 +18,14 @@ pub struct KvStore {
     /// where the value will be found. A separate lookup into the log is
     /// required to read the value.
     ///
-    mapping: HashMap<String, u64>,
+    mapping: Mutex<HashMap<String, u64>>,
 
     logger: Option<Logger>,
+}
+
+///
+pub struct KvStore {
+    state: Arc<State>,
 }
 
 impl KvStore {
@@ -43,61 +49,61 @@ impl KvStore {
         }
 
         Ok(KvStore {
-            logger,
-            log,
-            mapping,
+            state: Arc::new(State {
+                logger,
+                log,
+                mapping: Mutex::new(mapping),
+            }),
         })
     }
 
     pub fn compact(&mut self) -> Result<()> {
-        self.log.compact_log(|record: &LogRecord| -> bool {
+        self.state.log.compact_log(|record: &LogRecord| -> bool {
             match record.operation {
-                Rm { ref key } => self.mapping.contains_key(key),
-                Set { ref key, .. } => !self.mapping.contains_key(key),
+                Rm { ref key } => self.state.mapping.lock().unwrap().contains_key(key),
+                Set { ref key, .. } => !self.state.mapping.lock().unwrap().contains_key(key),
             }
         })
     }
 }
 
 impl KvsEngine for KvStore {
-
     ///
     ///
     ///
-    fn set(&mut self, key: String, value: String) -> Result<()> {
+    fn set(&self, key: String, value: String) -> Result<()> {
         let op = LogOperation::Set {
             key: key.to_string(),
             value,
         };
-        let position = self.log.write(op)?;
-        self.mapping.insert(key.to_string(), position);
+        let position = self.state.log.write(op)?;
+        self.state.mapping.lock().unwrap().insert(key.to_string(), position);
 
-        let total_size: u64 = self.log.total_size()?;
-        if total_size > 2048 {
-            if let Some(ref logger) = self.logger {
-                info!(logger, "Trigging compaction"; "total_size" => total_size);
-            }
-            self.log.compact_log(|elem| {
-                match &elem.operation {
-                    Set { key, .. } => {
-                        self.mapping.contains_key(key) && *self.mapping.get(key).unwrap() == elem.index
-                    }
-                    Rm { key } => {
-                        !self.mapping.contains_key(key)
-                    }
-                }
-            })?;
-        }
+        // let total_size: u64 = self.log.total_size()?;
+        // if total_size > 2048 {
+        //     if let Some(ref logger) = self.logger {
+        //         info!(logger, "Trigging compaction"; "total_size" => total_size);
+        //     }
+        //     self.log.compact_log(|elem| {
+        //         match &elem.operation {
+        //             Set { key, .. } => {
+        //                 self.mapping.contains_key(key) && *self.mapping.get(key).unwrap() == elem.index
+        //             }
+        //             Rm { key } => {
+        //                 !self.mapping.contains_key(key)
+        //             }
+        //         }
+        //     })?;
+        // }
 
         Ok(())
     }
 
     ///
-    fn get(&mut self, key: String) -> Result<Option<String>> {
-        let position = self.mapping.get(&key);
-        match position {
+    fn get(&self, key: String) -> Result<Option<String>> {
+        match self.state.mapping.lock().unwrap().get(&key) {
             Some(position) => {
-                let record = self.log.read(*position)?;
+                let record = self.state.log.read(*position)?;
                 match record.operation {
                     Set { key: _, value } => Ok(Some(value)),
                     Rm { key: _ } => Err(ErrorKind::InvalidData.into()),
@@ -110,11 +116,19 @@ impl KvsEngine for KvStore {
     ///
     ///
     ///
-    fn remove(&mut self, key: String) -> Result<()> {
-        self.log.write(LogOperation::Rm {
+    fn remove(&self, key: String) -> Result<()> {
+        self.state.log.write(LogOperation::Rm {
             key: key.to_string(),
         })?;
-        self.mapping.remove(&key);
+        self.state.mapping.lock().unwrap().remove(&key);
         Ok(())
+    }
+}
+
+impl Clone for KvStore {
+    fn clone(&self) -> Self {
+        Self {
+            state: self.state.clone()
+        }
     }
 }
