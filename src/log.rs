@@ -223,9 +223,7 @@ impl LogFile {
             .create(true)
             .open(&new_file_name)?;
 
-        let file_iterator = FileIterator::new(self)?;
-
-        for record in file_iterator {
+        for record in FileIterator::new(self)? {
             match record {
                 Ok((record, _)) => {
                     if predicate(&record) {
@@ -383,8 +381,7 @@ impl Log {
     /// which the record was written
     ///
     pub(crate) fn write(&self, operation: LogOperation) -> Result<u64> {
-        let mut log_files = self.log_files.lock().unwrap();
-        if let Some(mut entry) = log_files.last_entry() {
+        if let Some(mut entry) = self.log_files.lock().unwrap().last_entry() {
             let tail_file = entry.get_mut();
 
             let record = LogRecord {
@@ -443,17 +440,18 @@ impl Log {
 
         match File::open(&manifest_file_path) {
             Ok(mut file) => {
-                let mut records: Vec<FileManifestRecord> = Vec::new();
                 let header: FileManifestHeader = bincode::deserialize_from(&mut file).unwrap();
 
                 if let Some(logger) = logger {
                     info!(logger, "Manifest file opened"; "entries" => header.entry_count);
                 }
 
-                for _i in 0..header.entry_count {
-                    let manifest_entry: FileManifestRecord =
-                        bincode::deserialize_from(&mut file).unwrap();
-                    records.push(manifest_entry);
+                let mut records: Vec<FileManifestRecord> = Vec::new();
+                for _ in 0..header.entry_count {
+                    records.push(
+                        bincode::deserialize_from(&mut file)
+                            .map_err(|e| Error::other(e.to_string()))?,
+                    );
                 }
 
                 // Order according to the highest index number in the file, with the
