@@ -1,10 +1,12 @@
 use super::ThreadPool;
 
-struct NaiveThreadPool;
+use std::io::Result;
+
+pub struct NaiveThreadPool;
 
 impl ThreadPool for NaiveThreadPool {
-    fn new(_: u16) -> Self {
-        NaiveThreadPool { }
+    fn new(_: u16) -> Result<Self> {
+        Ok(NaiveThreadPool { })
     }
 
     ///

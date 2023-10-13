@@ -1,3 +1,6 @@
+use std::io::Result;
+use std::panic::AssertUnwindSafe;
+use std::sync::Mutex;
 use std::{sync::Arc, thread::JoinHandle};
 
 use super::ThreadPool;
@@ -8,7 +11,7 @@ enum Message {
     Run(Box<dyn FnOnce() + Send + 'static>),
     Shutdown,
 }
-struct SharedQueueThreadPool {
+pub struct SharedQueueThreadPool {
     queue: Arc<SegQueue<Message>>,
     threads: Vec<JoinHandle<()>>,
 }
@@ -22,29 +25,34 @@ impl Drop for SharedQueueThreadPool {
     }
 }
 
-impl ThreadPool for SharedQueueThreadPool {
-    fn new(thread_count: u16) -> Self {
-        let queue = Arc::new(SegQueue::new());
-        let threads = (0..thread_count)
-            .map(|_| {
-                let q = queue.clone();
-                std::thread::spawn(move || loop {
-                    match q.pop() {
-                        Some(Message::Run(f)) => {
-                            f();
-                        }
-                        Some(Message::Shutdown) => {
-                            return;
-                        }
-                        None => {
-                            return;
-                        }
-                    }
-                })
-            })
-            .collect();
+impl SharedQueueThreadPool {
+    fn thread_main(queue: Arc<SegQueue<Message>>) {
+        loop {
+            match queue.pop() {
+                Some(Message::Run(f)) => {
+                    let _ = std::panic::catch_unwind(AssertUnwindSafe(|| f()));
+                }
+                _ => {
+                    return;
+                }
+            }
+        }
+    }
+}
 
-        SharedQueueThreadPool { queue, threads }
+impl ThreadPool for SharedQueueThreadPool {
+    fn new(thread_count: u16) -> Result<Self> {
+        let queue = Arc::new(SegQueue::new());
+        let mut threads = Vec::new();
+
+        for _ in 0..thread_count {
+            let q = queue.clone();
+            threads.push(std::thread::spawn(move || {
+                SharedQueueThreadPool::thread_main(q)
+            }));
+        }
+
+        Ok(SharedQueueThreadPool { queue, threads })
     }
 
     fn spawn<F>(&self, job: F)

@@ -2,7 +2,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::io::Result;
 
-use kvs::thread_pool::*;
+use kvs::thread_pool::ThreadPool;
+use kvs::thread_pool::shared_queue_thread_pool::SharedQueueThreadPool;
+use kvs::thread_pool::naive_thread_pool::NaiveThreadPool;
+use kvs::thread_pool::rayon_thread_pool::RayonThreadPool;
 
 use crossbeam_utils::sync::WaitGroup;
 
